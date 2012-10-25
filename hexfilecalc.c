@@ -29,6 +29,10 @@ typedef struct inp_param {
 
 static bankblock_t s_blocks[4];
 int active_block = 0;
+static const unsigned int crchighbit    = 0x8000;
+static const unsigned int crcinit       = 0xFFFF;
+static const unsigned int crcpolynom    = 0x1021;
+static const unsigned int crcmask       = 0xFFFF;
 
 static BYTE
 asciito8bit(char msb,char lsb) {
@@ -76,7 +80,6 @@ parse_hexfile(const char* fname){
         /* if this is not colon, skip the whole line*/
         if(temp[0] != ':')
             continue;
-        //int len = (temp[1] - 0x30) << 4| (temp[2] - 0x30);
         len = asciito8bit(temp[1],temp[2]);
         addr = asciito16bit(temp[3],temp[4],temp[5],temp[6]);
         rtype = asciito8bit(temp[7],temp[8]);
@@ -112,12 +115,33 @@ parse_hexfile(const char* fname){
 
 }
 
-static int
+
+static unsigned int
 calculate_crc(inp_param_t *pinpparam){
     BYTE* pbuffer;
+	unsigned int i, j, c, bit;
+	unsigned int crc = crcinit;
+
     printf("calculate crc for b=%d,l=%d,a=0x%4.4X\n",pinpparam->no_bank,pinpparam->length,pinpparam->start_addr);
     pbuffer = s_blocks[pinpparam->no_bank/2].banks[pinpparam->no_bank % 2];
-    return 0;
+
+    for (i=0; i<pinpparam->length; i++) {
+
+		c = (unsigned long)*pbuffer;
+
+		for (j=0x80; j; j>>=1) {
+
+			bit = crc & crchighbit;
+			crc<<= 1;
+			if (c & j) bit^= crchighbit;
+            if (bit) crc^= crcpolynom;
+		}
+	}	
+
+	crc^= crcmask;
+	crc&= crcmask;
+
+	return(crc);
 }
 
 static int
@@ -130,6 +154,7 @@ help(void) {
 int 
 main(int argc, char* argv[]){
     int retval;
+    unsigned int crcout;
     int i;
     char in;
     inp_param_t input;
@@ -170,7 +195,8 @@ main(int argc, char* argv[]){
 
     retval = parse_hexfile(input.filein);
     printf("retval = %d, currentblock = %d\n",retval,active_block);
-    calculate_crc(&input);
+    crcout = calculate_crc(&input);
+    printf("CRC OUT = 0x%X\n",crcout);
 
     return 0;
 }
