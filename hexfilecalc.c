@@ -1,3 +1,11 @@
+/*
+ *
+ * Purpose: 
+ * parsing and calculating CRC value on 8051 Hex file
+ *
+ * Writer : Indra Bagus W <indra@xirkachipset.com>
+ *
+ */
 #include <stdio.h>
 #include <string.h>
 #include <ctype.h>
@@ -13,6 +21,13 @@
 #define REC_MDKARM_TYPE_START_LINEAR_ADDR   5 // (MDK-ARM only)
 
 
+#define PARSE_ERR_NOERROR        0
+#define PARSE_ERR_FILE          -1
+#define PARSE_ERR_EXT_LIN_ERR   -2
+#define PARSE_ERR_MDKARM        -3
+#define PARSE_ERR_EOF_NOTFOUND  -4
+
+
 typedef unsigned char   BYTE;
 
 typedef union bankblock {
@@ -25,6 +40,7 @@ typedef struct inp_param {
     int no_bank;
     int start_addr;
     int length;
+    unsigned int crc_init;
 }inp_param_t;
 
 static bankblock_t s_blocks[4];
@@ -70,21 +86,21 @@ pushbankdata(char pascibuff[],int bnkaddrofs,int datalen){
 int 
 parse_hexfile(const char* fname){
     char temp[255];
+    int retval;
     int len,addr,rtype;
     FILE* ifs = fopen(fname,"r");
-    if(!ifs)
-        return -1;
-    
+    if(!ifs){
+        return PARSE_ERR_FILE;
+    }    
     while(fgets(temp,255,ifs) != NULL)
     {
         /* if this is not colon, skip the whole line*/
         if(temp[0] != ':')
             continue;
-        len = asciito8bit(temp[1],temp[2]);
-        addr = asciito16bit(temp[3],temp[4],temp[5],temp[6]);
-        rtype = asciito8bit(temp[7],temp[8]);
+        len     = asciito8bit(temp[1],temp[2]);
+        addr    = asciito16bit(temp[3],temp[4],temp[5],temp[6]);
+        rtype   = asciito8bit(temp[7],temp[8]);
         
-        printf("[len,addr,rtype] = [%2.2X, %4.4X,%2.2X]\n",len,addr,rtype);
         switch(rtype)
         {
             case REC_TYPE_DATA :
@@ -92,26 +108,34 @@ parse_hexfile(const char* fname){
             break;
             
             case REC_TYPE_EOF :
-                fclose(ifs);
-                return 0;
+                break;
             
             case REC_TYPE_EXT_LIN_ADDR:
                 /* if (len != 2) error */
+                if(len != 2){
+                    retval = PARSE_ERR_EXT_LIN_ERR;
+                    goto closure;
+                }
                 active_block = asciito16bit(temp[9],temp[10],temp[11],temp[12]);
             break;
             
             case REC_TYPE_EXT_SEGM_ADDR:
-                fclose(ifs);
-                return -2;
+                break;
                 
             case REC_MDKARM_TYPE_START_LINEAR_ADDR:
-                fclose(ifs);
-                return -2;
+                retval = PARSE_ERR_MDKARM;
+                goto closure;
         }
     }
     
+    if(rtype == REC_TYPE_EOF)
+        retval = PARSE_ERR_NOERROR;
+    else
+        retval = PARSE_ERR_EOF_NOTFOUND;
+
+closure:
     fclose(ifs);
-    return 0;
+    return retval;
 
 }
 
@@ -120,14 +144,12 @@ static unsigned int
 calculate_crc(inp_param_t *pinpparam){
     BYTE* pbuffer;
 	unsigned int i, j, c, bit;
-	unsigned int crc = crcinit;
-
-    printf("calculate crc for b=%d,l=%d,a=0x%4.4X\n",pinpparam->no_bank,pinpparam->length,pinpparam->start_addr);
+    unsigned int crc = pinpparam->crc_init;
     pbuffer = s_blocks[pinpparam->no_bank/2].banks[pinpparam->no_bank % 2];
 
     for (i=0; i<pinpparam->length; i++) {
 
-		c = (unsigned long)*pbuffer;
+		c = (unsigned long)*(pbuffer+i);
 
 		for (j=0x80; j; j>>=1) {
 
@@ -138,7 +160,6 @@ calculate_crc(inp_param_t *pinpparam){
 		}
 	}	
 
-	crc^= crcmask;
 	crc&= crcmask;
 
 	return(crc);
@@ -146,7 +167,13 @@ calculate_crc(inp_param_t *pinpparam){
 
 static int
 help(void) {
-    printf("Usage: hexfilecalc -i inputfile -b no-bank -l length -a start-addr\n");
+    printf("\
+Usage: hexfilecalc  -i inputfile \n\
+                    -b no-bank \n\
+                    -l length \n\
+                    -a start-addr \n\
+                    -n initial-crc-val\n"
+                    );
     return -1;
 }
 
@@ -158,12 +185,12 @@ main(int argc, char* argv[]){
     int i;
     char in;
     inp_param_t input;
-    if(argc < 9)
+    if(argc < 11)
     {
         return help();
     }
     /* parse input argument */
-    for(i=0;i<4;++i){
+    for(i=0;i<5;++i){
         if(argv[(i*2)+1][0] != '-')
             return help();
         if(strlen(argv[(i*2)+1]) != 2)
@@ -186,7 +213,10 @@ main(int argc, char* argv[]){
             case 'a':
                 input.start_addr = (int)strtol(argv[(i*2) + 2],NULL,16);
             break;
-
+            
+            case 'n':
+                input.crc_init = (int)strtol(argv[(i*2) + 2],NULL,16);
+            break;
             default:
                 return help();
         }
@@ -194,7 +224,8 @@ main(int argc, char* argv[]){
 
 
     retval = parse_hexfile(input.filein);
-    printf("retval = %d, currentblock = %d\n",retval,active_block);
+    if(retval)
+        printf("PARSE ERROR CODE: %d\n",retval);
     crcout = calculate_crc(&input);
     printf("CRC OUT = 0x%X\n",crcout);
 
