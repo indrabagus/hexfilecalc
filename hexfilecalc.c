@@ -67,10 +67,11 @@ asciito16bit(char nibble1,char nibble2,char nibble3,char nibble4){
     retval |= ((nibble4-0x30) < 0x10) ?(nibble4-0x30) : (nibble4-0x37);
     return retval;
 }
-
+int sizerom = 0;
 static void 
 pushbankdata(char pascibuff[],int bnkaddrofs,int datalen){
     int i;
+    sizerom+=datalen;
     for(i=0;i<datalen;++i)
     {
         s_blocks[active_block].block[bnkaddrofs+i] = asciito8bit(pascibuff[i*2],pascibuff[i*2 + 1]);
@@ -140,14 +141,14 @@ closure:
 }
 
 
-static unsigned int
+static unsigned short
 calculate_crc(inp_param_t *pinpparam){
     BYTE* pbuffer;
 	unsigned int i, j, c, bit;
     unsigned int crc = pinpparam->crc_init;
     pbuffer = s_blocks[pinpparam->no_bank/2].banks[pinpparam->no_bank % 2];
 
-    for (i=0; i<pinpparam->length; i++) {
+    for (i=pinpparam->start_addr; i<(pinpparam->start_addr+pinpparam->length); ++i) {
 
 		c = (unsigned long)*(pbuffer+i);
 
@@ -165,6 +166,10 @@ calculate_crc(inp_param_t *pinpparam){
 	return(crc);
 }
 
+
+
+
+
 static int
 help(void) {
     printf("\
@@ -180,8 +185,9 @@ Usage: hexfilecalc  -i inputfile \n\
 
 int 
 main(int argc, char* argv[]){
+    BYTE* pbuffer;
     int retval;
-    unsigned int crcout;
+    unsigned short crcout;
     int i;
     char in;
     inp_param_t input;
@@ -189,6 +195,8 @@ main(int argc, char* argv[]){
     {
         return help();
     }
+    /* initial "flash bank" with '1' */
+    memset(s_blocks,0xFF,sizeof(s_blocks));
     /* parse input argument */
     for(i=0;i<5;++i){
         if(argv[(i*2)+1][0] != '-')
@@ -224,10 +232,22 @@ main(int argc, char* argv[]){
 
 
     retval = parse_hexfile(input.filein);
-    if(retval)
+    if(retval){
         printf("PARSE ERROR CODE: %d\n",retval);
+        return -1;
+    }
     crcout = calculate_crc(&input);
-    printf("CRC OUT = 0x%X\n",crcout);
+    printf("CRC OUTPUT = 0x%4.4X\n",crcout);
 
+#ifdef VALIDATE_CRC_ALGORITHM
+    // validate CRC
+    pbuffer = s_blocks[input.no_bank/2].banks[input.no_bank % 2];
+    pbuffer += input.length;
+    *pbuffer++ = ((unsigned char)((crcout >> 8) & 0xFF));
+    *pbuffer = ((unsigned char)(crcout & 0xFF));
+    input.length+=2;
+    crcout = calculate_crc(&input);
+    printf("Validate CRC Result = 0x%4.4X\n",crcout);
+#endif
     return 0;
 }
