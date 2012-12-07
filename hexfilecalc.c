@@ -21,12 +21,17 @@
 #define REC_MDKARM_TYPE_START_LINEAR_ADDR   5 // (MDK-ARM only)
 
 
-#define PARSE_ERR_NOERROR        0
-#define PARSE_ERR_FILE          -1
-#define PARSE_ERR_EXT_LIN_ERR   -2
-#define PARSE_ERR_MDKARM        -3
-#define PARSE_ERR_EOF_NOTFOUND  -4
+#define PARSE_ERR_NOERROR           0
+#define PARSE_ERR_FILE              1
+#define PARSE_ERR_EXT_LIN_ERR       2
+#define PARSE_ERR_MDKARM            3
+#define PARSE_ERR_EOF_NOTFOUND      4
 
+const char* strerrparse[] ={"SUCCESS",
+                            "FILE NOT FOUND",
+                            "EXTENDED LINEAR ERROR FORMAT",
+                            "MDK-ARM ERROR FORMAT",
+                            "EOF NOT FOUND"};
 
 typedef unsigned char   BYTE;
 
@@ -140,15 +145,21 @@ closure:
 
 }
 
-
+/**
+ * Fungsi untuk menghitung nilai CRC pada data yang ada didalam buffer pbuff
+ * @param[in]   pbuff   Pointer ke buffer yang berisi data
+ * @param[in]   len     Panjang data pada buffer
+ * @param[in]   init    Inisialisasi nilai CRC
+ * @return              Nilai CRC 
+ */
 static unsigned short
-calculate_crc(inp_param_t *pinpparam){
+calculate_crc(void* pbuff,unsigned int len,unsigned short init){
     BYTE* pbuffer;
 	unsigned int i, j, c, bit;
-    unsigned int crc = pinpparam->crc_init;
-    pbuffer = s_blocks[pinpparam->no_bank/2].banks[pinpparam->no_bank % 2];
+    unsigned short crc = init;
+    pbuffer = (BYTE*)pbuff;
 
-    for (i=pinpparam->start_addr; i<(pinpparam->start_addr+pinpparam->length); ++i) {
+    for (i=0; i<len; ++i) {
 
 		c = (unsigned long)*(pbuffer+i);
 
@@ -165,9 +176,6 @@ calculate_crc(inp_param_t *pinpparam){
 
 	return(crc);
 }
-
-
-
 
 
 static int
@@ -233,12 +241,13 @@ main(int argc, char* argv[]){
 
     retval = parse_hexfile(input.filein);
     if(retval){
-        printf("PARSE ERROR CODE: %d\n",retval);
+        printf("ERROR PARSING HEX FILE: %s\n",strerrparse[retval]);
         return -1;
     }
-    crcout = calculate_crc(&input);
+    pbuffer = s_blocks[input.no_bank/2].banks[input.no_bank % 2];
+    pbuffer+=input.start_addr;
+    crcout = calculate_crc(pbuffer,input.length,input.crc_init);
     printf("CRC OUTPUT = 0x%4.4X\n",crcout);
-
 #ifdef VALIDATE_CRC_ALGORITHM
     // validate CRC
     pbuffer = s_blocks[input.no_bank/2].banks[input.no_bank % 2];
